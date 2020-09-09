@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+
+import click
+from subprocess import check_output
+
+# wireguard config generator
+
+
+def make_docker():
+    dockerfile = 'FROM alpine:latest\nRUN apk update && apk add wireguard-tools\n'
+    cmd = f'/bin/echo -e "{dockerfile}" | docker build -q -t wireguard -'
+    ret = check_output(cmd, shell=True)
+    click.echo(ret)
+
+def make_private_key():
+    ret = check_output('docker run wireguard:latest wg genkey', shell=True)
+    return ret.decode().strip()
+
+def make_public_key(private_key):
+    ret = check_output(f'docker run wireguard:latest sh -c "echo {private_key} | wg pubkey"', shell=True)
+    return ret.decode().strip()
+
+def make_preshared_key():
+    ret = check_output('docker run wireguard:latest wg genkey', shell=True)
+    return ret.decode().strip()
+
+def make_keys():
+    private = make_private_key()
+    public = make_public_key(private)
+    psk = make_preshared_key()
+    return private, public, psk
+
+@click.command()
+@click.argument('gateway', metavar='GATEWAY_IP')
+@click.argument('port', metavar='GATEWAY_PORT')
+@click.argument('network', metavar='NETWORK_NUMBER')
+@click.argument('count', metavar='NUMBER_OF_CLIENTS', type=int)
+@click.option('-p/-P', '--peers_reachable/--no_peers_reachable', default=False)
+@click.option('-b', '--base_network', metavar='CLASS_B_NETWORK', default='10.33', help='network base ex: 10.33')
+@click.option('-o', '--offset', metavar='PEER_OFFSET', default=32, help='peer host number offset')
+def wireguard_config_generator(gateway, port, network, count, peers_reachable, base_network, offset):
+    click.echo('Creating docker image, please wait...')
+    make_docker()
+    click.echo('Generating keys...')
+    (gateway_private, gateway_public, gateway_psk) = make_keys()
+    peers = [make_keys() for peer in range(count)]
+    click.echo('Writing gateway config')
+    with open('gateway.conf','w') as ofp:
+        ofp.write('[Interface]\n')
+        ofp.write(f'PrivateKey = {gateway_private}\n')
+        ofp.write(f'Address = {base_network}.{network}.1/32\n')
+        ofp.write(f'ListenPort = {port}\n')
+        for (count, peer) in enumerate(peers):
+            private, public, psk = peer
+            peer = count + 1
+            ofp.write('[Peer]\n')
+            ofp.write('PersistentKeepAlive = 25\n')
+            ofp.write(f'PublicKey = {public}\n')
+            ofp.write(f'AllowedIPs = {base_network}.{network}.{peer+offset}/32\n')
+            ofp.write(f'PresharedKey = {psk}\n')
+            with open(f'peer{peer}.conf', 'w') as pfp:
+                click.echo(f'writing client {peer} config')
+                pfp.write('[Interface]\n')
+                pfp.write(f'PrivateKey = {private}\n')
+                pfp.write(f'Address = {base_network}.{network}.{peer+offset}/32\n')
+                pfp.write(f'[Peer]\n')
+                pfp.write('PersistentKeepalive = 25\n')
+                pfp.write(f'PublicKey = {gateway_public}\n')
+                if peers_reachable:
+                    allowed_ips = f'{base_network}.{network}.0/24'
+                else:
+                    allowed_ips = f'{base_network}.{network}.1/32'
+                pfp.write(f'AllowedIPs = {allowed_ips}\n')
+                pfp.write(f'PresharedKey = {psk}\n')
+                pfp.write(f'Endpoint = {gateway}:{port}\n')
+
+if __name__=='__main__':
+    wireguard_config_generator()
