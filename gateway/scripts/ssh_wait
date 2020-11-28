@@ -1,0 +1,17 @@
+#!/bin/bash
+IP=$1
+PRIVATE_KEY=$2
+MAX_RETRIES=10
+SLEEP=10
+echo "Waiting for $IP to spin up..."
+index=1
+while (( $index <= $MAX_RETRIES ))
+do
+  ssh -i ${PRIVATE_KEY} -o StrictHostKeyChecking=off root@$IP uname -a
+  case $? in 
+    (0) echo "${index}: Success"; break;;
+    (*) echo "${index} of ${MAX_RETRIES}: SSH not responding, waiting $SLEEP seconds...";; 
+  esac
+  sleep $SLEEP
+  ((index+=1))
+done 

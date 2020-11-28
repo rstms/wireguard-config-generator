@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+
+import click
+from subprocess import check_call, check_output
+
+# wireguard config generator
+
+def make_docker():
+    try:
+        check_call('wg')
+    except FileNotFoundError as ex:
+        dockerfile = 'FROM alpine:latest\nRUN apk update && apk add wireguard-tools\n'
+        cmd = f'/bin/echo -e "{dockerfile}" | docker build -q -t wireguard -'
+        ret = check_output(cmd, shell=True)
+        click.echo(ret)
+        return 'docker run wireguard:latest '
+    else:
+        click.echo('Using local wg binary')
+        return ''
+
+def make_private_key(prefix):
+    ret = check_output(f'{prefix}wg genkey', shell=True)
+    return ret.decode().strip()
+
+def make_public_key(prefix, private_key):
+    ret = check_output(f'{prefix}sh -c "echo {private_key} | wg pubkey"', shell=True)
+    return ret.decode().strip()
+
+def make_preshared_key(prefix):
+    ret = check_output(f'{prefix}wg genkey', shell=True)
+    return ret.decode().strip()
+
+def make_keys(prefix):
+    private = make_private_key(prefix)
+    public = make_public_key(prefix, private)
+    psk = make_preshared_key(prefix)
+    return private, public, psk
+
+@click.command()
+@click.argument('gateway', metavar='GATEWAY_IP')
+@click.option('--port', metavar='GATEWAY_PORT', default='51820')
+@click.option('--network', metavar='NETWORK_NUMBER', default='10')
+@click.option('--clients', metavar='CLIENT_COUNT', type=int, default=8)
+@click.option('-p/-P', '--peers_reachable/--no_peers_reachable', default=False)
+@click.option('-b', '--base_network', metavar='CLASS_B_NETWORK', default='10.10', help='network base ex: 10.10')
+@click.option('-o', '--offset', metavar='PEER_OFFSET', default=100, help='peer host number offset')
+@click.option('-b/-B', '--bsd/--no_bsd', default=True, help='OpenBSD mode')
+@click.option('-r/-R', '--route/--no_route', default=True, help='route internet traffic via wireguard')
+
+
+def wireguard_config_generator(gateway, port, network, clients, peers_reachable, base_network, offset, bsd, route):
+    click.echo('Creating docker image, please wait...')
+    prefix = make_docker()
+    click.echo('Generating keys...')
+    (gateway_private, gateway_public, gateway_psk) = make_keys(prefix)
+    peers = [make_keys(prefix) for peer in range(clients)]
+    click.echo('Writing gateway config')
+    with open('gateway.conf','w') as ofp:
+        if bsd:
+            ofp.write(f'wgkey {gateway_private} wgport {port}\n')
+            ofp.write(f'inet {base_network}.{network}.1 255.255.255.0\n')
+        else:
+            ofp.write('[Interface]\n')
+            ofp.write(f'PrivateKey = {gateway_private}\n')
+            ofp.write(f'Address = {base_network}.{network}.1/32\n')
+            ofp.write(f'ListenPort = {port}\n')
+        for (count, peer) in enumerate(peers):
+            private, public, psk = peer
+            peer_ip = count + offset + 1
+            if bsd:
+                ofp.write(f'wgpeer {public} wgaip {base_network}.{network}.{peer_ip}/32 wgpka 25 wgpsk {psk}\n')
+            else:
+                ofp.write('[Peer]\n')
+                ofp.write('PersistentKeepAlive = 25\n')
+                ofp.write(f'PublicKey = {public}\n')
+                ofp.write(f'AllowedIPs = {base_network}.{network}.{peer_ip}/32\n')
+                ofp.write(f'PresharedKey = {psk}\n')
+            with open(f'peer{count+1}.conf', 'w') as pfp:
+                click.echo(f'writing client {count+1} config')
+                pfp.write('[Interface]\n')
+                pfp.write(f'PrivateKey = {private}\n')
+                pfp.write(f'Address = {base_network}.{network}.{peer_ip}/32\n')
+                if route:
+                    pfp.write(f'DNS = {base_network}.{network}.1\n')
+                pfp.write(f'[Peer]\n')
+                pfp.write('PersistentKeepalive = 25\n')
+                pfp.write(f'PublicKey = {gateway_public}\n')
+                if route:
+                    allowed_ips = '0.0.0.0/0'
+                elif peers_reachable:
+                    allowed_ips = f'{base_network}.{network}.0/24'
+                else:
+                    allowed_ips = f'{base_network}.{network}.1/32'
+                pfp.write(f'AllowedIPs = {allowed_ips}\n')
+                pfp.write(f'PresharedKey = {psk}\n')
+                pfp.write(f'Endpoint = {gateway}:{port}\n')
+
+if __name__=='__main__':
+    wireguard_config_generator(auto_envvar_prefix='WG')
