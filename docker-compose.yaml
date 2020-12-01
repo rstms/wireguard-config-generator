@@ -5,19 +5,17 @@ services:
     build:
       context: gateway
     volumes:
-      - gateway-config:/root/config
+      - type: bind
+        source: ./config
+        target: /root/config
     environment:
       WG_NAME:
       WG_COUNT:
       WG_NETWORK:
       WG_PORT:
       SSH_KEY:
-      WG_VPS:
       VULTR_API_KEY:
       TF_VAR_HOSTNAME:
       TF_VAR_REGION_ID:
       TF_VAR_PLAN_ID:
       TF_VAR_OS_ID:
-
-volumes:
-  gateway-config:

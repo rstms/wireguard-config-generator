@@ -1,3 +1,0 @@
-#!/bin/bash
-set | grep -e '^WG_\|^TF_' | awk -F= '{print "unset " $1;}' 
-xargs <env -n 1 echo export

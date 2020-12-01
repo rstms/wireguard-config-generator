@@ -1,49 +1,52 @@
+#
 # makefile for wireguard-config-generator
 #
 
 NAME=gateway
 DC=docker-compose --env-file ./env
-MAKE=${DC} run ${NAME} make 
+RUN=${DC} run ${NAME}
 
-VPS=docker run -e VULTR_API_KEY vultr/vultr-cli
+# use local vultr-cli
+CLI=vultr-cli
 
+# uncomment to use docker version of vultr-cli
+#VPS=docker run -e VULTR_API_KEY vultr/vultr-cli
+
+default: build deploy
 
 build:
-	${DC} build
+	${DC} build --build-arg VPS=vultr --no-rm
 
-deploy: _deploy getconfig
-
-_deploy:
-	${MAKE} deploy
+deploy:
+	${RUN} deploy 
 
 destroy:
-	${MAKE} destroy 
+	${RUN} destroy 
 
 shell:
-	${MAKE} shell
+	${RUN} shell
 
 bash:
-	${DC} run ${NAME} bash -l
+	${RUN} bash -l
 
-getconfig:
-	${DC} run -T ${NAME} tar cO -C /root config | tar xv
+tarconfig:
+	@${DC} run -T ${NAME} tar czO -C /root config >config.tgz
 
 setenv:
-	@./configure.sh
+	@./configure
 
 getenv:
-	@set | grep -e '^WG_\|^TF_'
+	@(set | grep -e '^WG_\|^TF_') || true
 
-clean:
+sterile: clean
 	docker-compose stop
 	docker system prune --all --volumes --force
 	rm -f config/*
 
-
 vpslist:
-	for TYPE in ssh-key script instance; do ${VPS} $$TYPE list; done
+	for TYPE in ssh-key script instance; do ${CLI} $$TYPE list; done
 
-vpsclean:
-	${VPS} ssh-key list | awk '/${NAME}_sshkey/{print $$1}' | xargs -r -n 1 ${VPS} ssh-key delete
-	${VPS} script list | awk '/${NAME}_config/{print $$1}' | xargs -r -n 1 ${VPS} script delete
-	${VPS} instance list | awk '/${NAME}_instance/{print $$1}' | xargs -r -n 1 ${VPS} instance delete
+clean:
+	${CLI} ssh-key list | awk '/${NAME}_sshkey/{print $$1}' | xargs -r -n 1 ${CLI} ssh-key delete
+	${CLI} script list | awk '/${NAME}_config/{print $$1}' | xargs -r -n 1 ${CLI} script delete
+	${CLI} instance list | awk '/${NAME}_instance/{print $$1}' | xargs -r -n 1 ${CLI} instance delete

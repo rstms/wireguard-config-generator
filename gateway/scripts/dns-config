@@ -1,0 +1,20 @@
+#!/bin/bash
+
+rcctl stop unbound
+
+# - modify unbound.conf to listen and allow DNS client connections on wg0 network
+cat>EDITS <<EOF
+/.*interface: 127.0.0.1$/ a\\
+        interface: 10.10.${WG_NETWORK}.1
+;
+/.*access-control: 0.0.0.0\/0 refuse$/ a\\
+	access-control: 10.10.${WG_NETWORK}.0/24 allow
+;
+EOF
+
+cat EDITS
+
+sed -ibak -f EDITS /var/unbound/etc/unbound.conf
+
+rcctl enable unbound
+rcctl start unbound
