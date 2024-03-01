@@ -9,4 +9,4 @@ environment:
 	$(foreach var,${REQUIRED_VARS},$(if ${${var}},,$(error ${var} is empty)))
 
 config: environment
-	wireguard-config-generator
+	./scripts/wireguard_config_generator
